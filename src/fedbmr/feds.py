@@ -6,7 +6,12 @@ class GenerativeModel(object):
     local_prior: Callable
     likelihood: Callable
 
-    def model(self):
+    def __init__(self, global_prior, local_prior, likelihood) -> None:
+        self.global_prior = global_prior
+        self.local_prior = local_prior
+        self.likelihood = likelihood
+
+    def __call__(self):
         global_params = self.global_prior()
         local_params = self.local_prior(global_params)
         self.likelihood(local_params)
