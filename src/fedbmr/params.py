@@ -59,9 +59,9 @@ def natural(p):
 
 @dispatch(Normal, dict)
 def canonical(p, params):
-    p.loc = - params['eta1'] / (2 * params['eta2'])
-    p.scale = jnp.sqrt( - 1 / (2 * params['eta2']))
-    return p
+    loc = - params['eta1'] / (2 * params['eta2'])
+    scale = jnp.sqrt( - 1 / (2 * params['eta2']))
+    return dict(loc=loc, scale=scale)
 
 @dispatch(LogNormal)
 def natural(p):
@@ -71,23 +71,21 @@ def natural(p):
 
 @dispatch(LogNormal, dict)
 def canonical(p, params):
-    p.loc = - params['eta1'] / (2 * params['eta2'])
-    p.scale = jnp.sqrt( - 1 / (2 * params['eta2']))
-    return p
+    loc = - params['eta1'] / (2 * params['eta2'])
+    scale = jnp.sqrt( - 1 / (2 * params['eta2']))
+    return dict(loc=loc, scale=scale)
 
 @dispatch(Gamma)
 def natural(p):
     alpha, beta = p.concentration, p.rate
-    return dict(eta1=alpha - 1, eta2=- beta)
+    return dict(eta1=alpha-1, eta2=-beta)
 
 @dispatch(Gamma, dict)
 def canonical(p, params):
     alpha = params['eta1'] + 1
     beta = - params['eta2']
     
-    p.concentration = alpha
-    p.rate = beta
-    return p
+    return dict(concentration=alpha, rate=beta)
 
 @dispatch(Beta)
 def natural(p):
@@ -95,6 +93,4 @@ def natural(p):
 
 @dispatch(Beta, dict)
 def canonical(p, params):
-    p.concentration1 = params['eta1']
-    p.concentration0 = params['eta2']
-    return p
+    return dict(concentration1=params['eta1'], concentration0=params['eta2'])
