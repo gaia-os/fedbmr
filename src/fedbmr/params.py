@@ -55,7 +55,7 @@ def natural(p):
 def natural(p):
     mu = p.loc
     sigma_sqr = p.scale ** 2
-    return dict(eta1=mu / sigma_sqr, eta2=- 1 / 2 * sigma_sqr)
+    return dict(eta1=mu / sigma_sqr, eta2=- 1 / (2 * sigma_sqr))
 
 @dispatch(Normal, dict)
 def canonical(p, params):
@@ -67,7 +67,7 @@ def canonical(p, params):
 def natural(p):
     mu = p.loc
     sigma_sqr = p.scale ** 2
-    return dict(eta1=mu / sigma_sqr, eta2=- 1 / 2 * sigma_sqr)
+    return dict(eta1=mu / sigma_sqr, eta2=- 1 / (2 * sigma_sqr))
 
 @dispatch(LogNormal, dict)
 def canonical(p, params):
