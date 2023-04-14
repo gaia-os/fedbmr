@@ -1,0 +1,18 @@
+{
+  "id": "2696cd6c-ab30-44af-ac80-de336152526a",
+  "datetime": "2019-10-14",
+  "location": {
+    "coordinates": [37.7086, -78.7843],
+    "type": "Point"
+  },
+  "project_name": "Roots.and.Culture.Hemp",
+  "reporter": "rob@element.6.com",
+  "provenance": "https://api.element.6.com/get_data?12345",
+  "observations": [
+    { "name": "v1.measurement.base.agriculture.Yield.HempYield.Continuous",
+      "lot_name": "Indoor1",
+      "value": [323.920]
+    }
+  ],
+  "evidence": []
+}
