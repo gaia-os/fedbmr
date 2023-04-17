@@ -15,7 +15,6 @@ Array = jnp.ndarray
 
 class NaturalExponentialFamily(object):
     dist: Distribution  # numpyro distribution
-    divide: Callable  # function used for removing contribution of local approximate likelihood
     natural_params: Dict  # dictionary containing natural parameters of that distribution
     approx_params: Dict  # dictionary containing natural paramters of the approximate likelihood
 
@@ -203,8 +202,9 @@ class InfFed(object):
     def make_local_global_esimate(self, params):
         post_params = defaultdict(lambda: defaultdict(lambda: {}))
         for key, value in params.items():
-            s1, s2 = key.split('.')
-            post_params[s1][s2] = value
+            if 'global' in key:
+                _, s1, s2 = key.split('.')
+                post_params[s1][s2] = value
         
         prior_specs = self.global_prior.prior_specs
         return GlobalPrior(prior_specs, canonical_params=dict(post_params))
@@ -227,7 +227,13 @@ class InfFed(object):
 
         svi = SVI(model, guide, optimizer, loss)
 
-        self.results = svi.run(_rng_key, num_steps, progress_bar=False, **data)
+        self.results = svi.run(
+            _rng_key, 
+            num_steps, 
+            stable_update=True, 
+            progress_bar=False, 
+            **data
+        )
 
         self.local_global_estimate = self.make_local_global_esimate(self.results.params)
 
