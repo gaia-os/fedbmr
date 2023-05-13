@@ -3,13 +3,22 @@ import jax.random as jr
 import jax.numpy as jnp
 
 from collections import defaultdict
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, List
 from optax import adabelief
 from numpyro.infer import SVI, TraceGraph_ELBO
 from numpyro.distributions import Distribution
 from numpyro.optim import optax_to_numpyro
 from functools import partial
 from fedbmr.params import canonical, natural
+from fedbmr.schemas import schema
+
+from gql import gql
+
+from defradb import (
+    DefraClient,
+    DefraConfig,
+    dict_to_create_query,
+)
 
 Array = jnp.ndarray
 
@@ -112,7 +121,9 @@ class InfFed(object):
     def __init__(
         self, 
         global_prior: GlobalPrior,
-        generative_model: GenerativeModel, 
+        generative_model: GenerativeModel,
+        port: str, 
+        peers: List[str], 
         posterior: Posterior,
         optimizer: Callable = adabelief,
     ) -> None:
@@ -121,6 +132,24 @@ class InfFed(object):
         self.generative_model = generative_model
         self.posterior = posterior
         self.optimizer = optimizer
+
+        endpoint = f"localhost:{port}/api/v0/"
+        self.cfg = DefraConfig(endpoint)
+        self.client = DefraClient(self.cfg)
+        self.__init_database(peers)
+
+    def __init_database(self, peers):
+        typename = 'Parameters'
+        response_schema = self.client.load_schema(schema)
+
+        # Creating a new document of the type with random data.
+        data = {
+            "name": "RCModel",
+            "votes": dict([(peerid, {'value': {}, 'timestamp': 0}) for peerid in peers])
+        }
+
+        request = dict_to_create_query(typename, data)
+        self.client.request(request)
         
     def recieve_prior(self, global_prior):
 
