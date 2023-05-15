@@ -9,7 +9,7 @@
   "reporter": "rob@element.6.com",
   "provenance": "https://api.element.6.com/get_data?12345",
   "observations": [
-    { "name": "pl.roots_agent.SoilOrganicMatter.Continuous",
+    { "name": "v1.measurement.base.agriculture.SoilOrganicMatter.SoilOrganicMatter.Continuous",
       "lot_name": "Indoor1",
       "value": [7.1]
     }
