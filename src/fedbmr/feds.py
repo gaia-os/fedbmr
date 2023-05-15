@@ -1,6 +1,14 @@
+import os
+import numpy as np
+import json
+
 import jax.tree_util as jtu
 import jax.random as jr
 import jax.numpy as jnp
+
+from google.cloud import pubsub_v1
+from typing import Optional, List
+from google.api_core.exceptions import AlreadyExists
 
 from collections import defaultdict
 from typing import Callable, Dict, Optional, List
@@ -9,16 +17,9 @@ from numpyro.infer import SVI, TraceGraph_ELBO
 from numpyro.distributions import Distribution
 from numpyro.optim import optax_to_numpyro
 from functools import partial
-from fedbmr.params import canonical, natural
-from fedbmr.schemas import schema
-
-from gql import gql
-
-from defradb import (
-    DefraClient,
-    DefraConfig,
-    dict_to_create_query,
-)
+from .params import canonical, natural
+from .pubsub import publisher, pub, sub
+from .utils import encode_parameters, decode_parameters
 
 Array = jnp.ndarray
 
@@ -39,6 +40,7 @@ class NaturalExponentialFamily(object):
 class GlobalPrior(object):
     prior_specs: Dict
     canonical_params: Dict
+    prior: Dict
     approx_likelihood_params: Optional[Dict]=None
 
     def __init__(
@@ -50,7 +52,35 @@ class GlobalPrior(object):
         self.prior_specs = prior_specs
         self.canonical_params = canonical_params
         self.approx_likelihood_params = approx_likelihood_params
+
+    def set_approx_likelihood_params(self, approx_likelihood_params: Dict) -> None:
+        self.approx_likelihood_params = approx_likelihood_params
+
+    def set_natural_params(self, natural_params: Dict) -> None:
+
+        def update_canonical_params(func, params, natural_params):
+            p = self.create_prior(func, params)
+            return canonical(p.dist, natural_params)
         
+        self.canonical_params = jtu.tree_map(
+            update_canonical_params, self.prior_specs, self.canonical_params, natural_params
+        )
+
+    def get_natural_params(self) -> Dict:
+        prior = jtu.tree_map(
+            self.create_prior, 
+            self.prior_specs, 
+            self.canonical_params
+        )
+
+        return jtu.tree_map(lambda p: p.natural_params, prior)
+    
+    def set_canonical_params(self, canonical_params: Dict) -> None:
+        self.canonical_params = canonical_params
+
+    def get_canonical_params(self) -> Dict:
+        return self.canonical_params
+
     def create_prior(self, func, params):
         return NaturalExponentialFamily(func(**params))
        
@@ -59,7 +89,7 @@ class GlobalPrior(object):
             self.create_prior, 
             self.prior_specs, 
             self.canonical_params
-        )
+        ) 
 
         if self.approx_likelihood_params is None:
             self.approx_likelihood_params = jtu.tree_map(
@@ -109,6 +139,18 @@ class Posterior(object):
         self.local_posterior(global_output)
 
 
+def update_approximate_likelihood_params(
+    local_dist: NaturalExponentialFamily, 
+    global_dist: NaturalExponentialFamily, 
+    previous_approx_params: Dict) -> Dict:
+        
+        return jtu.tree_map(
+            lambda x, y, z: x - y + z, 
+            local_dist.natural_params, 
+            global_dist.natural_params, 
+            previous_approx_params
+        )
+
 class InfFed(object):
     '''Federeated inference.
     '''
@@ -122,9 +164,11 @@ class InfFed(object):
         self, 
         global_prior: GlobalPrior,
         generative_model: GenerativeModel,
-        port: str, 
-        peers: List[str], 
         posterior: Posterior,
+        *,
+        topic_id: str,
+        project_id: str,
+        client_id: str,
         optimizer: Callable = adabelief,
     ) -> None:
 
@@ -133,24 +177,49 @@ class InfFed(object):
         self.posterior = posterior
         self.optimizer = optimizer
 
-        endpoint = f"localhost:{port}/api/v0/"
-        self.cfg = DefraConfig(endpoint)
-        self.client = DefraClient(self.cfg)
-        self.__init_database(peers)
+        self.__create_topic(topic_id, project_id)
+        subscription_id = topic_id + '.' + client_id
+        self.__create_subscription(subscription_id, project_id)
 
-    def __init_database(self, peers):
-        typename = 'Parameters'
-        response_schema = self.client.load_schema(schema)
+    def __create_topic(self, topic_id: str, project_id: str) -> None:
+        self.publisher = publisher()
+        self.topic_path = self.publisher.topic_path(project_id, topic_id)
 
-        # Creating a new document of the type with random data.
-        data = {
-            "name": "RCModel",
-            "votes": dict([(peerid, {'value': {}, 'timestamp': 0}) for peerid in peers])
-        }
+        try:
+            topic = self.publisher.create_topic(name=self.topic_path)
+            print('created topic', topic.name)
+        except AlreadyExists:
+            pass
+    
+    def __create_subscription(self, subscription_id: str, project_id: str) -> None:
+            # Initialize a Subscriber client
+            subscriber = pubsub_v1.SubscriberClient()
+            # Create a fully qualified identifier in the form of
+            # `projects/{project_id}/subscriptions/{subscription_id}`
+            self.subscription_path = subscriber.subscription_path(project_id, subscription_id)
 
-        request = dict_to_create_query(typename, data)
-        self.client.request(request)
-        
+            try:
+                subscription = subscriber.create_subscription(
+                    request={"name": self.subscription_path, "topic": self.topic_path}
+                )
+                print('created subscription:', subscription.name)
+            except AlreadyExists:
+                pass
+
+            subscriber.close()
+
+    def get_prior(self, timeout: int = 10, verbose: bool = False, flush: bool = False) -> None:
+        """Recieve the last estimate of the global prior from Pub/Sub and update global_prior field"""
+        subscriber = pubsub_v1.SubscriberClient()
+        data = sub(subscriber, self.subscription_path, timeout=timeout, verbose=verbose)
+        if len(data) > 0 and not flush:
+            global_prior_natural_parameters = data[0]
+
+            natural_params = decode_parameters(global_prior_natural_parameters)
+            if verbose: 
+                print(natural_params)
+            self.global_prior.set_natural_params(natural_params)
+
     def recieve_prior(self, global_prior):
 
         canonical_params = jtu.tree_map(
@@ -182,42 +251,33 @@ class InfFed(object):
 
     def send_message(self):
 
-        def update_approximate_likelihood_params(glb, lcl, approx_params):
-            return jtu.tree_map(
-                lambda x, y, z: x - y + z, 
-                lcl.natural_params, 
-                glb.natural_params, 
-                approx_params
-            )
-
         # update approximate likelihood params
         approx_params = jtu.tree_map(
-            update_approximate_likelihood_params, 
-            self.global_prior(), 
+            update_approximate_likelihood_params,
             self.local_global_estimate(),
+            self.global_prior(), 
             self.global_prior.approx_likelihood_params
         )
-        self.global_prior.approx_likelihood_params = approx_params
+
+        self.global_prior.set_approx_likelihood_params(approx_params)
         return approx_params
     
     def send_posterior(self):
-
-        def update_approximate_likelihood_params(glb, lcl, approx_params):
-            return jtu.tree_map(
-                lambda x, y, z: x - y + z, 
-                lcl.natural_params, 
-                glb.natural_params, 
-                approx_params
-            )
-
         # update approximate likelihood params
         approx_params = jtu.tree_map(
             update_approximate_likelihood_params, 
-            self.global_prior(), 
             self.local_global_estimate(),
+            self.global_prior(), 
             self.global_prior.approx_likelihood_params
         )
-        self.global_prior.approx_likelihood_params = approx_params
+        self.global_prior.set_approx_likelihood_params(approx_params)
+
+        natural_params = self.local_global_estimate.get_natural_params()
+
+        encoded_params = encode_parameters(natural_params)
+
+        # publish natural parameters of the local posterior estimate
+        self.pub_result = pub(self.publisher, encoded_params, self.topic_path)
         
         return self.local_global_estimate()
 
