@@ -13,6 +13,7 @@ from google.api_core.exceptions import AlreadyExists
 from collections import defaultdict
 from typing import Callable, Dict, Optional, List
 from optax import adabelief
+from numpyro import sample
 from numpyro.infer import SVI, TraceGraph_ELBO
 from numpyro.distributions import Distribution
 from numpyro.optim import optax_to_numpyro
@@ -22,6 +23,14 @@ from .pubsub import publisher, pub, sub
 from .utils import encode_parameters, decode_parameters
 
 Array = jnp.ndarray
+
+def sample_prior(prior):
+    output_dict = {}
+    for name, p in prior.items():
+        output_dict[name] = sample("global." + name, p.dist)
+
+    return output_dict
+
 
 class NaturalExponentialFamily(object):
     dist: Distribution  # numpyro distribution
