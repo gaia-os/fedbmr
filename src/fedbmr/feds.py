@@ -222,7 +222,7 @@ class InfFed(object):
         subscriber = pubsub_v1.SubscriberClient()
         data = sub(subscriber, self.subscription_path, timeout=timeout, verbose=verbose)
         if len(data) > 0 and not flush:
-            global_prior_natural_parameters = data[0]
+            global_prior_natural_parameters = data[-1]
 
             natural_params = decode_parameters(global_prior_natural_parameters)
             if verbose: 
@@ -313,7 +313,8 @@ class InfFed(object):
             data, 
             num_steps=10_000, 
             num_particles=10,
-            opt_kwargs={'learning_rate': 1e-3}
+            opt_kwargs={'learning_rate': 1e-3},
+            progress_bar=False
         ):
         
         optimizer = optax_to_numpyro(self.optimizer(**opt_kwargs))
@@ -329,7 +330,7 @@ class InfFed(object):
             _rng_key, 
             num_steps, 
             stable_update=True, 
-            progress_bar=False, 
+            progress_bar=progress_bar, 
             **data
         )
 
